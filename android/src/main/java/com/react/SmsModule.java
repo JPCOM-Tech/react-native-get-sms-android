@@ -28,6 +28,7 @@ import android.net.Uri;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
+import android.os.Build;
 
 import android.telephony.SmsManager;
 import android.telephony.SmsMessage;
@@ -50,6 +51,10 @@ public class SmsModule extends ReactContextBaseJavaModule /*implements LoaderMan
     private ReactContext mReactContext;
     private Callback cb_autoSend_succ = null;
     private Callback cb_autoSend_err = null;
+    
+    // Constantes para compatibilidade com APIs antigas
+    private static final int RECEIVER_NOT_EXPORTED = 0x00000004;
+    private static final int FLAG_IMMUTABLE = 0x04000000; // Para compatibilidade com API < 23
 
     public SmsModule(ReactApplicationContext reactContext) {
         super(reactContext);
@@ -168,7 +173,7 @@ public class SmsModule extends ReactContextBaseJavaModule /*implements LoaderMan
             JSONArray addressList = jsonObject.getJSONArray("addressList");
             int n;
             if ((n = addressList.length()) > 0) {
-                PendingIntent sentIntent = PendingIntent.getBroadcast(mActivity, 0, new Intent("SENDING_SMS"), PendingIntent.FLAG_IMMUTABLE);
+                PendingIntent sentIntent = PendingIntent.getBroadcast(mActivity, 0, new Intent("SENDING_SMS"), FLAG_IMMUTABLE);
                 SmsManager sms = SmsManager.getDefault();
                 for (int i = 0; i < n; i++) {
                     String address;
@@ -176,7 +181,7 @@ public class SmsModule extends ReactContextBaseJavaModule /*implements LoaderMan
                         sms.sendTextMessage(address, null, text, sentIntent, null);
                 }
             } else {
-                PendingIntent sentIntent = PendingIntent.getActivity(mActivity, 0, new Intent("android.intent.action.VIEW"), PendingIntent.FLAG_IMMUTABLE);
+                PendingIntent sentIntent = PendingIntent.getActivity(mActivity, 0, new Intent("android.intent.action.VIEW"), FLAG_IMMUTABLE);
                 Intent intent = new Intent("android.intent.action.VIEW");
                 intent.putExtra("sms_body", text);
                 intent.setData(Uri.parse("sms:"));
@@ -241,11 +246,11 @@ public class SmsModule extends ReactContextBaseJavaModule /*implements LoaderMan
             ArrayList<PendingIntent> sentPendingIntents = new ArrayList<PendingIntent>();
             ArrayList<PendingIntent> deliveredPendingIntents = new ArrayList<PendingIntent>();
 
-            PendingIntent sentPI = PendingIntent.getBroadcast(context, 0, new Intent(SENT), PendingIntent.FLAG_IMMUTABLE);
-            PendingIntent deliveredPI = PendingIntent.getBroadcast(context, 0, new Intent(DELIVERED), PendingIntent.FLAG_IMMUTABLE);
+            PendingIntent sentPI = PendingIntent.getBroadcast(context, 0, new Intent(SENT), FLAG_IMMUTABLE);
+            PendingIntent deliveredPI = PendingIntent.getBroadcast(context, 0, new Intent(DELIVERED), FLAG_IMMUTABLE);
 
             //---when the SMS has been sent---
-            context.registerReceiver(new BroadcastReceiver() {
+            BroadcastReceiver sentReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context arg0, Intent arg1) {
                     switch (getResultCode()) {
@@ -266,10 +271,16 @@ public class SmsModule extends ReactContextBaseJavaModule /*implements LoaderMan
                             break;
                     }
                 }
-            }, new IntentFilter(SENT));
+            };
+            
+            if (Build.VERSION.SDK_INT >= 33) { // Android 13 (TIRAMISU)
+                context.registerReceiver(sentReceiver, new IntentFilter(SENT), RECEIVER_NOT_EXPORTED);
+            } else {
+                context.registerReceiver(sentReceiver, new IntentFilter(SENT));
+            }
 
             //---when the SMS has been delivered---
-            context.registerReceiver(new BroadcastReceiver() {
+            BroadcastReceiver deliveredReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context arg0, Intent arg1) {
                     switch (getResultCode()) {
@@ -281,7 +292,13 @@ public class SmsModule extends ReactContextBaseJavaModule /*implements LoaderMan
                             break;
                     }
                 }
-            }, new IntentFilter(DELIVERED));
+            };
+            
+            if (Build.VERSION.SDK_INT >= 33) { // Android 13 (TIRAMISU)
+                context.registerReceiver(deliveredReceiver, new IntentFilter(DELIVERED), RECEIVER_NOT_EXPORTED);
+            } else {
+                context.registerReceiver(deliveredReceiver, new IntentFilter(DELIVERED));
+            }
 
             SmsManager sms = SmsManager.getDefault();
             ArrayList<String> parts = sms.divideMessage(message);
