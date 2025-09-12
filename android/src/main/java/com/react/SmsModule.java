@@ -241,63 +241,86 @@ public class SmsModule extends ReactContextBaseJavaModule /*implements LoaderMan
         cb_autoSend_err = errorCallback;
 
         try {
-            String SENT = "SMS_SENT";
-            String DELIVERED = "SMS_DELIVERED";
+            String SENT = "SMS_SENT_" + System.currentTimeMillis();
+            String DELIVERED = "SMS_DELIVERED_" + System.currentTimeMillis();
             ArrayList<PendingIntent> sentPendingIntents = new ArrayList<PendingIntent>();
             ArrayList<PendingIntent> deliveredPendingIntents = new ArrayList<PendingIntent>();
 
-            PendingIntent sentPI = PendingIntent.getBroadcast(context, 0, new Intent(SENT), FLAG_IMMUTABLE);
-            PendingIntent deliveredPI = PendingIntent.getBroadcast(context, 0, new Intent(DELIVERED), FLAG_IMMUTABLE);
+            // Usando contexto do React para garantir que funcione corretamente
+            Context reactContext = getReactApplicationContext();
+            
+            PendingIntent sentPI = PendingIntent.getBroadcast(reactContext, 0, new Intent(SENT), FLAG_IMMUTABLE);
+            PendingIntent deliveredPI = PendingIntent.getBroadcast(reactContext, 0, new Intent(DELIVERED), FLAG_IMMUTABLE);
 
             //---when the SMS has been sent---
             BroadcastReceiver sentReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context arg0, Intent arg1) {
-                    switch (getResultCode()) {
-                        case Activity.RESULT_OK:
-                            sendCallback("SMS sent", true);
-                            break;
-                        case SmsManager.RESULT_ERROR_GENERIC_FAILURE:
-                            sendCallback("Generic failure", false);
-                            break;
-                        case SmsManager.RESULT_ERROR_NO_SERVICE:
-                            sendCallback("No service", false);
-                            break;
-                        case SmsManager.RESULT_ERROR_NULL_PDU:
-                            sendCallback("Null PDU", false);
-                            break;
-                        case SmsManager.RESULT_ERROR_RADIO_OFF:
-                            sendCallback("Radio off", false);
-                            break;
+                    try {
+                        switch (getResultCode()) {
+                            case Activity.RESULT_OK:
+                                sendCallback("SMS sent successfully", true);
+                                break;
+                            case SmsManager.RESULT_ERROR_GENERIC_FAILURE:
+                                sendCallback("Generic failure", false);
+                                break;
+                            case SmsManager.RESULT_ERROR_NO_SERVICE:
+                                sendCallback("No service", false);
+                                break;
+                            case SmsManager.RESULT_ERROR_NULL_PDU:
+                                sendCallback("Null PDU", false);
+                                break;
+                            case SmsManager.RESULT_ERROR_RADIO_OFF:
+                                sendCallback("Radio off", false);
+                                break;
+                        }
+                        // Desregistrar o receiver após uso
+                        try {
+                            reactContext.unregisterReceiver(this);
+                        } catch (Exception e) {
+                            // Receiver já foi desregistrado
+                        }
+                    } catch (Exception e) {
+                        sendCallback("Error processing SMS result: " + e.getMessage(), false);
                     }
                 }
             };
             
             if (Build.VERSION.SDK_INT >= 33) { // Android 13 (TIRAMISU)
-                context.registerReceiver(sentReceiver, new IntentFilter(SENT), RECEIVER_NOT_EXPORTED);
+                reactContext.registerReceiver(sentReceiver, new IntentFilter(SENT), RECEIVER_NOT_EXPORTED);
             } else {
-                context.registerReceiver(sentReceiver, new IntentFilter(SENT));
+                reactContext.registerReceiver(sentReceiver, new IntentFilter(SENT));
             }
 
             //---when the SMS has been delivered---
             BroadcastReceiver deliveredReceiver = new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context arg0, Intent arg1) {
-                    switch (getResultCode()) {
-                        case Activity.RESULT_OK:
-                            sendEvent(mReactContext, "sms_onDelivery", "SMS delivered");
-                            break;
-                        case Activity.RESULT_CANCELED:
-                            sendEvent(mReactContext, "sms_onDelivery", "SMS not delivered");
-                            break;
+                    try {
+                        switch (getResultCode()) {
+                            case Activity.RESULT_OK:
+                                sendEvent(mReactContext, "sms_onDelivery", "SMS delivered");
+                                break;
+                            case Activity.RESULT_CANCELED:
+                                sendEvent(mReactContext, "sms_onDelivery", "SMS not delivered");
+                                break;
+                        }
+                        // Desregistrar o receiver após uso
+                        try {
+                            reactContext.unregisterReceiver(this);
+                        } catch (Exception e) {
+                            // Receiver já foi desregistrado
+                        }
+                    } catch (Exception e) {
+                        // Log do erro mas não afeta o callback principal
                     }
                 }
             };
             
             if (Build.VERSION.SDK_INT >= 33) { // Android 13 (TIRAMISU)
-                context.registerReceiver(deliveredReceiver, new IntentFilter(DELIVERED), RECEIVER_NOT_EXPORTED);
+                reactContext.registerReceiver(deliveredReceiver, new IntentFilter(DELIVERED), RECEIVER_NOT_EXPORTED);
             } else {
-                context.registerReceiver(deliveredReceiver, new IntentFilter(DELIVERED));
+                reactContext.registerReceiver(deliveredReceiver, new IntentFilter(DELIVERED));
             }
 
             SmsManager sms = SmsManager.getDefault();
@@ -307,15 +330,18 @@ public class SmsModule extends ReactContextBaseJavaModule /*implements LoaderMan
                 sentPendingIntents.add(i, sentPI);
                 deliveredPendingIntents.add(i, deliveredPI);
             }
+            
+            // Enviar SMS
             sms.sendMultipartTextMessage(phoneNumber, null, parts, sentPendingIntents, deliveredPendingIntents);
 
+            // Salvar na caixa de saída
             ContentValues values = new ContentValues();
             values.put("address", phoneNumber);
             values.put("body", message);
-            context.getContentResolver().insert(Uri.parse("content://sms/sent"), values);
+            reactContext.getContentResolver().insert(Uri.parse("content://sms/sent"), values);
 
         } catch (Exception e) {
-            sendCallback(e.getMessage(), false);
+            sendCallback("Exception: " + e.getMessage(), false);
         }
     }
 }
